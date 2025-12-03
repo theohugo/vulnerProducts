@@ -35,7 +35,7 @@ function Header() {
 function HomePage() {
   const [products, setProducts] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
+  const [searchResults, setSearchResults] = useState([]); 
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
 
@@ -56,30 +56,45 @@ function HomePage() {
 
   const handleSearch = async (e) => {
     e.preventDefault();
-    if (!searchQuery.trim()) {
+    // Keep for manual submit, but logic moved to effect
+  };
+
+  // Debounced auto-search when typing
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (!q) {
       setSearchResults([]);
+      setSearching(false);
       return;
     }
 
     setSearching(true);
-    try {
-      const response = await axios.get(`http://localhost:8000/products/search?q=${searchQuery}`);
-      setSearchResults(response.data);
-      setSearching(false);
-    } catch (err) {
-      console.error('Search error:', err);
-      alert('Search failed: ' + err.message);
-      setSearching(false);
-    }
-  };
+    const t = setTimeout(async () => {
+      try {
+        const response = await axios.get(
+          `http://localhost:8000/products/search?q=${encodeURIComponent(q)}`
+        );
+        setSearchResults(response.data);
+      } catch (err) {
+        console.error('Search error:', err);
+      } finally {
+        setSearching(false);
+      }
+    }, 300); // debounce delay
+
+    return () => clearTimeout(t);
+  }, [searchQuery]);
 
   const clearSearch = () => {
     setSearchQuery('');
     setSearchResults([]);
   };
 
-  const displayProducts = searchResults.length > 0 || searchQuery ? searchResults : products;
+  // Show full product list while searching; show results after fetch
   const isSearchActive = searchQuery.trim().length > 0;
+  const displayProducts = isSearchActive
+    ? (searching ? products : searchResults)
+    : products;
 
   if (loading) {
     return (
@@ -125,26 +140,6 @@ function HomePage() {
             onFocus={(e) => e.target.style.borderColor = '#4CAF50'}
             onBlur={(e) => e.target.style.borderColor = '#ddd'}
           />
-          <button 
-            type="submit" 
-            disabled={searching}
-            style={{
-              padding: '0.75rem 2rem',
-              background: '#4CAF50',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              fontSize: '1rem',
-              fontWeight: 'bold',
-              cursor: 'pointer',
-              transition: 'background 0.2s',
-              opacity: searching ? 0.6 : 1
-            }}
-            onMouseOver={(e) => e.target.style.background = '#45a049'}
-            onMouseOut={(e) => e.target.style.background = '#4CAF50'}
-          >
-            {searching ? 'Searching...' : 'Search'}
-          </button>
           {isSearchActive && (
             <button 
               type="button"
@@ -166,7 +161,6 @@ function HomePage() {
             </button>
           )}
         </form>
-
       </div>
 
       {/* Results Summary */}
@@ -178,7 +172,7 @@ function HomePage() {
       }}>
         <h2>
           {isSearchActive 
-            ? `Search Results (${displayProducts.length})` 
+            ? (searching ? `Searching...` : `Search Results (${displayProducts.length})`)
             : `All Products (${products.length})`}
         </h2>
         {isSearchActive && (
@@ -189,7 +183,7 @@ function HomePage() {
       </div>
 
       {/* Products Grid */}
-      {displayProducts.length === 0 ? (
+      {isSearchActive && !searching && displayProducts.length === 0 ? (
         <div style={{
           background: 'white',
           padding: '3rem',
