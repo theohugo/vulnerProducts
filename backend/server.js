@@ -10,6 +10,9 @@ const port = 8000
 
 app.use(cors())
 
+// Parse JSON bodies (useful for future POST/PUT validations)
+app.use(express.json());
+
 const db = new sqlite3.Database('./database.db', (err) => {
     if (err) console.error(err.message);
     else console.log('Connected to SQLite database.');
@@ -48,8 +51,10 @@ async function insertRandomUsers() {
       const password = u.login.password;
       const email = u.email;
 
+      // Use parameterized query instead of interpolated values
       db.run(
-        `INSERT INTO users (username, email, password, is_admin) VALUES ('${username}', '${email}', '${password}', 0)`,
+        `INSERT INTO users (username, email, password, is_admin) VALUES (?, ?, ?, ?)`,
+        [username, email, password, 0],
         (err) => {
           if (err) console.error(err.message);
         }
@@ -99,17 +104,34 @@ app.get('/generate-products', async (req, res) => {
 })
 
 
-app.get('/products/search', (req, res) => {
-  const searchTerm = req.query.q || '';
+// Simple validators
+function isNonEmptyString(value) {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+function toBoundedString(value, maxLen = 100) {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  return trimmed.length > maxLen ? trimmed.slice(0, maxLen) : trimmed;
+}
+function toPositiveInt(value) {
+  const n = Number(value);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
 
-  console.log(req.query.q);
-  
-  
-  const query = `SELECT * FROM products WHERE title LIKE '%${searchTerm}%' OR description LIKE '%${searchTerm}%' OR category LIKE '%${searchTerm}%'`;
-  
-  console.log('Search query:', query);
-  
-  db.all(query, [], (err, rows) => {
+
+app.get('/products/search', (req, res) => {
+  const raw = req.query.q ?? '';
+  // Validate: must be a string, trimmed, <= 100 chars
+  const searchTerm = toBoundedString(raw, 100);
+  if (!isNonEmptyString(searchTerm) && raw) {
+    return res.status(400).json({ error: 'Invalid search query' });
+  }
+  const like = `%${searchTerm}%`;
+
+  const query = `SELECT * FROM products 
+                 WHERE title LIKE ? OR description LIKE ? OR category LIKE ?`;
+
+  db.all(query, [like, like, like], (err, rows) => {
     if (err) {
       console.error('SQL Error:', err.message);
       return res.status(500).json({ error: err.message });
@@ -127,15 +149,17 @@ app.get('/products', (req, res) => {
 });
 
 app.get('/products/:id', (req, res) => {
-    const productId = req.params.id
+  const productId = toPositiveInt(req.params.id);
+  if (!productId) {
+    return res.status(400).json({ error: 'Invalid product id' });
+  }
 
-    const query = `SELECT * FROM products WHERE id = ${productId}`;
-
-    db.get(query, [], (err, rows) => {
-        if (err)
-            return res.status(500).json({error : err.message})
-        res.json(rows || {})
-    });
+  const query = `SELECT * FROM products WHERE id = ?`;
+  db.get(query, [productId], (err, rows) => {
+    if (err)
+      return res.status(500).json({ error: err.message });
+    res.json(rows || {});
+  });
 })
 
 app.get('/', (req, res) => {
